@@ -1,0 +1,42 @@
+1.Download Matlab
+2.Download Visual Studio 2019 Express
+
+---------------------------------------------------------------------------------------
+
+3.Start Matlab and choose compiler:
+
+ %setup compiler
+ %choose c++ and visual studio compiler with 
+ mex -setup 
+ 
+
+--------------------------------------------------------------------------------------- 
+
+4.Load greateyes library
+
+ %loadlibrary
+ pathlib = 'e:\libgreateyes\greateyes.dll'
+ pathHeader ='e:\libgreateyes\greateyes.h'
+
+ %all dependencies have to be in right place (greateyes.dll, geCommLib.dll, messages.dll, ...)
+ loadlibrary(pathlib ,pathHeader )
+
+ %list functions: 
+ libfunctions('greateyes')
+	
+ %or call libfunctionsview to get an overview about functions and datatypes of the parameters
+ libfunctionsview greateyes
+
+ %GetNumberOfConnectedCams and check for a connected greateyes USB camera
+ resInt = calllib('greateyes', 'GetNumberOfConnectedCams')
+ 
+ ..
+ 
+ %unload labrary 
+ unloadlibrary greateyes
+ 
+---------------------------------------------------------------------------------------
+ 
+ 
+ 
+  

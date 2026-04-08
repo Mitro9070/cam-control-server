@@ -1,0 +1,27 @@
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ASCOM.ProjectR1.Camera", "src\ASCOM.ProjectR1.Camera\ASCOM.ProjectR1.Camera.csproj", "{1DF20D3C-A4A5-4A2E-9F79-1A72D50A6C47}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ASCOM.ProjectR1.Camera.Tests", "tests\ASCOM.ProjectR1.Camera.Tests\ASCOM.ProjectR1.Camera.Tests.csproj", "{7C6F6055-7B1A-4F84-95ED-337D58CE0B7F}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{1DF20D3C-A4A5-4A2E-9F79-1A72D50A6C47}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{1DF20D3C-A4A5-4A2E-9F79-1A72D50A6C47}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{1DF20D3C-A4A5-4A2E-9F79-1A72D50A6C47}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{1DF20D3C-A4A5-4A2E-9F79-1A72D50A6C47}.Release|Any CPU.Build.0 = Release|Any CPU
+		{7C6F6055-7B1A-4F84-95ED-337D58CE0B7F}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{7C6F6055-7B1A-4F84-95ED-337D58CE0B7F}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{7C6F6055-7B1A-4F84-95ED-337D58CE0B7F}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{7C6F6055-7B1A-4F84-95ED-337D58CE0B7F}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+EndGlobal

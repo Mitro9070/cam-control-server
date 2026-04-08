@@ -1,0 +1,2 @@
+
+Temperature Hardware Option: 42223

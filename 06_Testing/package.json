@@ -1,0 +1,16 @@
+{
+  "name": "06_testing",
+  "version": "1.0.0",
+  "description": "Тестовый контур:\r - unit tests,\r - integration tests,\r - e2e smoke tests,\r - Conform/ConformU сценарии.",
+  "main": "index.js",
+  "scripts": {
+    "test": "playwright test",
+    "test:ui-smoke": "playwright test tests/ui-smoke.spec.ts --project=chromium"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "@playwright/test": "^1.58.2"
+  }
+}

@@ -1,0 +1,259 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Project_R1 Camera UI</title>
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="/ui/styles.css?v=20260325" />
+  </head>
+  <body>
+    <header class="site-header">
+      <h1>Project_R1 Camera UI (панель проверки)</h1>
+      <div class="hint header-meta">Базовый API (API base): <span id="apiBase">/api/v1</span></div>
+      <section class="dashboard techno-dashboard" id="dashboard" aria-label="Статус системы">
+        <article class="dash-card" id="dashCardService" data-tone="neutral">
+          <div class="dash-card-glow" aria-hidden="true"></div>
+          <div class="dash-card-head">
+            <span class="dash-led" id="dashLedService" aria-hidden="true"></span>
+            <span class="dash-label">Сервис</span>
+          </div>
+          <div class="dash-value" id="dashService">—</div>
+          <div class="dash-sub" id="dashServiceSub"></div>
+        </article>
+        <article class="dash-card" id="dashCardCamera" data-tone="neutral">
+          <div class="dash-card-glow" aria-hidden="true"></div>
+          <div class="dash-card-head">
+            <span class="dash-led" id="dashLedCamera" aria-hidden="true"></span>
+            <span class="dash-label">Камера</span>
+          </div>
+          <div class="dash-value" id="dashConnected">—</div>
+          <div class="dash-sub" id="dashCameraSub">ожидание линка</div>
+        </article>
+        <article class="dash-card dash-card--wide" id="dashCardTemp" data-tone="neutral">
+          <div class="dash-card-glow" aria-hidden="true"></div>
+          <div class="dash-card-head">
+            <span class="dash-led dash-led--ice" id="dashLedTemp" aria-hidden="true"></span>
+            <span class="dash-label">CCD температура</span>
+          </div>
+          <div class="dash-value dash-value--xl" id="dashTemp">—</div>
+          <div class="dash-sub" id="dashTempSub">сенсор</div>
+        </article>
+        <article class="dash-card" id="dashCardTarget" data-tone="neutral">
+          <div class="dash-card-glow" aria-hidden="true"></div>
+          <div class="dash-card-head">
+            <span class="dash-led dash-led--amber" id="dashLedTarget" aria-hidden="true"></span>
+            <span class="dash-label">Цель охлаждения</span>
+          </div>
+          <div class="dash-value" id="dashTarget">—</div>
+          <div class="dash-sub" id="dashTargetSub"></div>
+        </article>
+        <article class="dash-card" id="dashCardPower" data-tone="neutral">
+          <div class="dash-card-glow" aria-hidden="true"></div>
+          <div class="dash-card-head">
+            <span class="dash-led dash-led--green" id="dashLedPower" aria-hidden="true"></span>
+            <span class="dash-label">Мощность Peltier</span>
+          </div>
+          <div class="dash-value" id="dashPower">—</div>
+          <div class="dash-meter" aria-hidden="true"><span id="dashPowerMeter"></span></div>
+        </article>
+        <article class="dash-card" id="dashCardExposure" data-tone="neutral">
+          <div class="dash-card-glow" aria-hidden="true"></div>
+          <div class="dash-card-head">
+            <span class="dash-led dash-led--cyan" id="dashLedExposure" aria-hidden="true"></span>
+            <span class="dash-label">Экспозиция</span>
+          </div>
+          <div class="dash-value" id="dashExposure">idle</div>
+          <div class="dash-sub" id="dashExposureSub"></div>
+        </article>
+      </section>
+      <div class="hint ui-hint-bar" id="uiHint">Подсказка: начните с "Проверка сервиса", затем "Подключить".</div>
+    </header>
+
+    <nav class="tabs">
+      <button class="tab active" data-tab="connection">Подключение (Connection)</button>
+      <button class="tab" data-tab="exposure">Экспозиция (Exposure)</button>
+      <button class="tab" data-tab="image">Изображение (Image)</button>
+      <button class="tab" data-tab="cooling">Охлаждение (Cooling)</button>
+      <button class="tab" data-tab="settings">Камера/Профили (Camera)</button>
+      <button class="tab" data-tab="logs">Логи (Logs)</button>
+    </nav>
+
+    <main>
+      <section class="panel active" id="tab-connection">
+        <h2>Подключение (Connection)</h2>
+        <p class="hint-inline">Подключение может занимать до 5-15 секунд. Во время выполнения кнопка показывает спиннер.</p>
+        <div class="actions">
+          <button id="btnHealth">Проверка сервиса (Health)</button>
+          <button id="btnState">Состояние камеры (State)</button>
+          <button id="btnConnect">Подключить (Connect)</button>
+          <button id="btnDisconnect">Отключить (Disconnect)</button>
+          <button id="btnCapabilities">Возможности камеры (Capabilities)</button>
+        </div>
+      </section>
+
+      <section class="panel" id="tab-exposure">
+        <h2>Экспозиция (Exposure)</h2>
+        <p class="hint-inline">После старта экспозиции используйте "Статус" или "Последний кадр" - процент выполнения обновляется автоматически.</p>
+        <div class="row">
+          <label>Длительность, сек (Duration) <input type="number" id="expDuration" value="1" min="0.1" step="0.1" /></label>
+          <label>Светлый кадр (Light frame) <input type="checkbox" id="expLight" checked /></label>
+        </div>
+        <div class="actions">
+          <button id="btnExposureStart">Старт (Start)</button>
+          <button id="btnExposureStatus">Статус (Status)</button>
+          <button id="btnExposureStop">Остановить (Stop)</button>
+          <button id="btnExposureAbort">Прервать (Abort)</button>
+          <button id="btnImageLatest">Последний кадр (Latest image)</button>
+        </div>
+        <p>Текущий ID экспозиции (Active exposure id): <code id="activeExposureId">none</code></p>
+        <div class="progress-block" id="expProgressBlock">
+          <div class="progress-label"><span id="expProgressText">Прогресс экспозиции: 0%</span></div>
+          <div class="progress-track"><div id="expProgressBar"></div></div>
+        </div>
+      </section>
+
+      <section class="panel" id="tab-image">
+        <h2>Изображение (Image)</h2>
+        <div class="actions">
+          <button id="btnImageMetadata">Метаданные (Metadata)</button>
+          <button id="btnImageShowLatest">Показать последний кадр</button>
+        </div>
+        <h3>Resize</h3>
+        <div class="row">
+          <label>Ширина <input type="number" id="imgResizeWidth" value="512" min="1" max="8192" step="1" /></label>
+          <label>Высота <input type="number" id="imgResizeHeight" value="512" min="1" max="8192" step="1" /></label>
+        </div>
+        <div class="actions">
+          <button id="btnImageResize">Изменить размер (Resize)</button>
+        </div>
+        <h3>Экспорт FITS</h3>
+        <div class="row">
+          <label>Имя файла <input type="text" id="fitsFileName" value="latest_image.fits" /></label>
+        </div>
+        <div class="actions">
+          <button id="btnImageExportFits">Сохранить в FITS</button>
+        </div>
+        <canvas id="imagePreviewCanvas" width="860" height="340"></canvas>
+      </section>
+
+      <section class="panel" id="tab-cooling">
+        <h2>Охлаждение (Cooling)</h2>
+        <div class="row">
+          <label>Охладитель включен (Cooler on) <input type="checkbox" id="coolerOn" checked /></label>
+          <label>Мощность, % (Power) <input type="number" id="coolerPower" value="70" min="0" max="100" step="1" /></label>
+          <label>Целевая температура, C (Target) <input type="number" id="targetTemp" value="-20" step="1" /></label>
+        </div>
+        <div class="actions">
+          <button id="btnCoolingStatus">Статус (Status)</button>
+          <button id="btnCoolingPower">Установить мощность (Set power)</button>
+          <button id="btnCoolingTarget">Установить цель (Set target)</button>
+        </div>
+        <h3>Контроллер охлаждения</h3>
+        <div class="row">
+          <label
+            >Профиль контроллера
+            <select id="coolingMode">
+              <option value="safe">Safe</option>
+              <option value="balanced" selected>Balanced</option>
+              <option value="fast">Fast</option>
+            </select>
+          </label>
+        </div>
+        <div class="actions">
+          <button id="btnCoolingControllerStatus">Статус контроллера</button>
+          <button id="btnCoolingControllerMode">Применить профиль</button>
+        </div>
+        <h3>Плавный прогрев (Warm-up)</h3>
+        <div class="row">
+          <label>Цель, C (Target) <input type="number" id="warmTarget" value="0" step="1" /></label>
+          <label>Шаг температуры, C (Temp step) <input type="number" id="warmStepTemp" value="5" min="1" step="1" /></label>
+          <label>Шаг мощности, % (Power step) <input type="number" id="warmStepPower" value="10" min="1" max="100" step="1" /></label>
+          <label>Интервал, сек (Interval) <input type="number" id="warmStepInterval" value="0.5" min="0.1" step="0.1" /></label>
+        </div>
+        <div class="actions">
+          <button id="btnWarmupStart">Старт прогрева (Start warm-up)</button>
+          <button id="btnWarmupStatus">Статус прогрева (Warm-up status)</button>
+        </div>
+        <p>ID прогрева (Warm-up id): <code id="activeWarmupId">none</code></p>
+      </section>
+
+      <section class="panel" id="tab-settings">
+        <h2>Камера и профили (Camera profiles)</h2>
+        <h3>Профиль подключения</h3>
+        <div class="row">
+          <label>Профили <select id="profileSelect"></select></label>
+          <label>Имя профиля <input type="text" id="profileName" value="default-profile" /></label>
+          <label>IP камеры <input type="text" id="profileAddress" value="" placeholder="192.168.31.234" /></label>
+          <label>Порт <input type="number" id="profilePort" value="12345" min="1" max="65535" step="1" /></label>
+          <label>Интерфейс <input type="number" id="profileInterface" value="3" step="1" /></label>
+          <label>Camera index <input type="number" id="profileIndex" value="0" step="1" /></label>
+          <label>Temp HW option <input type="number" id="profileTempOption" value="42223" step="1" /></label>
+        </div>
+        <div class="actions">
+          <button id="btnProfilesLoad">Загрузить профили</button>
+          <button id="btnProfileCreate">Создать профиль</button>
+          <button id="btnProfileUpdate">Обновить профиль</button>
+          <button id="btnProfileActivate">Активировать профиль</button>
+        </div>
+
+        <h3>Рабочие настройки камеры</h3>
+        <div class="row">
+          <label
+            >Скорость считывания (Readout speed)
+            <select id="setReadoutSpeed">
+              <option value="50">50 kHz</option>
+              <option value="100">100 kHz</option>
+              <option value="250">250 kHz</option>
+              <option value="500">500 kHz</option>
+              <option value="1000" selected>1 MHz</option>
+              <option value="3000">3 MHz</option>
+              <option value="5000">5 MHz</option>
+            </select>
+          </label>
+          <label
+            >Режим усиления (Gain mode)
+            <select id="setGainMode">
+              <option value="0">High capacity mode (max dynamic range)</option>
+              <option value="1" selected>Low noise / high sensitivity mode</option>
+            </select>
+          </label>
+          <label>Уровень охлаждения (Cooler level) <input type="number" id="setCoolerLevel" value="1" step="1" /></label>
+          <label>Есть затвор (Has shutter) <input type="checkbox" id="setHasShutter" checked /></label>
+          <label>Имя сенсора (Sensor name) <input type="text" id="setSensorName" value="GreatEyes 9.0" /></label>
+          <label
+            >Экспорт FITS (BITPIX)
+            <select id="setFitsExportBitpix" title="Разрядность пикселей в файле FITS при сохранении кадра">
+              <option value="16">16 — int16 + BZERO 32768 (классика)</option>
+              <option value="32" selected>32 — int32, ADU как у сенсора</option>
+            </select>
+          </label>
+        </div>
+        <div class="actions">
+          <button id="btnSettingsLoad">Загрузить (Load settings)</button>
+          <button id="btnSettingsSave">Сохранить (Save settings)</button>
+        </div>
+      </section>
+
+      <section class="panel" id="tab-logs">
+        <h2>Логи (Logs)</h2>
+        <div class="row">
+          <label>Лимит записей (Limit) <input type="number" id="logsLimit" value="50" min="1" max="500" step="1" /></label>
+        </div>
+        <div class="actions">
+          <button id="btnLogsLoad">Загрузить логи (Load logs)</button>
+          <button id="btnCoolingTelemetryLoad">Темп. телеметрия</button>
+          <button id="btnCoolingTelemetryAuto">Автообновление: off</button>
+        </div>
+        <canvas id="coolingTelemetryChart" width="860" height="220"></canvas>
+      </section>
+    </main>
+
+    <section class="output">
+      <h2>Вывод (Output)</h2>
+      <pre id="output"></pre>
+    </section>
+
+    <script src="/ui/app.js?v=20260325"></script>
+  </body>
+</html>
