@@ -33,6 +33,13 @@ const dashLedTemp = document.getElementById("dashLedTemp");
 const dashLedExposure = document.getElementById("dashLedExposure");
 const dashLedTarget = document.getElementById("dashLedTarget");
 const dashLedPower = document.getElementById("dashLedPower");
+const roiBinXInput = document.getElementById("roiBinX");
+const roiBinYInput = document.getElementById("roiBinY");
+const roiStartXInput = document.getElementById("roiStartX");
+const roiStartYInput = document.getElementById("roiStartY");
+const roiNumXInput = document.getElementById("roiNumX");
+const roiNumYInput = document.getElementById("roiNumY");
+const frameSummary = document.getElementById("frameSummary");
 let telemetryAutoTimer = null;
 let dashboardTimer = null;
 let dashboardRefreshInFlight = false;
@@ -76,6 +83,157 @@ async function callApi(method, path, body) {
 function setUiHintText(text) {
   if (!uiHint) return;
   uiHint.textContent = `Подсказка: ${text}`;
+}
+
+function setFrameSummaryText(text) {
+  if (!frameSummary) return;
+  frameSummary.textContent = text;
+}
+
+function readIntegerInput(node, label) {
+  const value = Number(node?.value);
+  if (!Number.isFinite(value) || value < 0 || !Number.isInteger(value)) {
+    throw new Error(`${label} должно быть целым числом`);
+  }
+  return value;
+}
+
+function setFrameInputBounds(caps) {
+  if (!caps) return;
+  const sensorX = Number(caps.camera_x_size);
+  const sensorY = Number(caps.camera_y_size);
+  const maxBinX = Math.max(1, Number(caps.max_binx || 1));
+  const maxBinY = Math.max(1, Number(caps.max_biny || 1));
+  const binX = Math.max(1, Number(roiBinXInput?.value || 1));
+  const binY = Math.max(1, Number(roiBinYInput?.value || 1));
+  const binnedWidth = Math.max(1, Math.floor(sensorX / binX));
+  const binnedHeight = Math.max(1, Math.floor(sensorY / binY));
+  if (roiBinXInput) roiBinXInput.max = String(maxBinX);
+  if (roiBinYInput) roiBinYInput.max = String(maxBinY);
+  if (roiStartXInput) roiStartXInput.max = String(Math.max(0, binnedWidth - 1));
+  if (roiStartYInput) roiStartYInput.max = String(Math.max(0, binnedHeight - 1));
+  if (roiNumXInput) roiNumXInput.max = String(binnedWidth);
+  if (roiNumYInput) roiNumYInput.max = String(binnedHeight);
+}
+
+function setFrameFormValues(payload) {
+  roiBinXInput.value = String(payload.bin_x);
+  roiBinYInput.value = String(payload.bin_y);
+  roiStartXInput.value = String(payload.start_x);
+  roiStartYInput.value = String(payload.start_y);
+  roiNumXInput.value = String(payload.num_x);
+  roiNumYInput.value = String(payload.num_y);
+}
+
+function describeFrame(payload, caps) {
+  const sensorPart =
+    caps && Number.isFinite(Number(caps.camera_x_size)) && Number.isFinite(Number(caps.camera_y_size))
+      ? ` | sensor ${caps.camera_x_size}x${caps.camera_y_size}`
+      : "";
+  const sensorRoiPart =
+    caps
+      ? ` | raw start ${payload.start_x * payload.bin_x},${payload.start_y * payload.bin_y}`
+      : "";
+  return `bin ${payload.bin_x}x${payload.bin_y} | start ${payload.start_x},${payload.start_y} | size ${payload.num_x}x${payload.num_y}${sensorPart}${sensorRoiPart}`;
+}
+
+function buildFramePayload(caps) {
+  const payload = {
+    bin_x: readIntegerInput(roiBinXInput, "Bin X"),
+    bin_y: readIntegerInput(roiBinYInput, "Bin Y"),
+    start_x: readIntegerInput(roiStartXInput, "Start X"),
+    start_y: readIntegerInput(roiStartYInput, "Start Y"),
+    num_x: readIntegerInput(roiNumXInput, "Num X"),
+    num_y: readIntegerInput(roiNumYInput, "Num Y"),
+  };
+  if (payload.bin_x < 1 || payload.bin_y < 1) {
+    throw new Error("Bin X / Bin Y должны быть >= 1");
+  }
+  if (payload.num_x < 1 || payload.num_y < 1) {
+    throw new Error("Num X / Num Y должны быть >= 1");
+  }
+  if (caps) {
+    const sensorX = Number(caps.camera_x_size);
+    const sensorY = Number(caps.camera_y_size);
+    const maxBinX = Number(caps.max_binx || 1);
+    const maxBinY = Number(caps.max_biny || 1);
+    const binnedWidth = Math.floor(sensorX / payload.bin_x);
+    const binnedHeight = Math.floor(sensorY / payload.bin_y);
+    if (payload.bin_x > maxBinX || payload.bin_y > maxBinY) {
+      throw new Error(`Binning вне допустимого диапазона 1..${maxBinX} / 1..${maxBinY}`);
+    }
+    if (payload.start_x > Math.max(0, binnedWidth - 1)) {
+      throw new Error(`StartX должен быть в диапазоне 0..${Math.max(0, binnedWidth - 1)} для bin ${payload.bin_x}`);
+    }
+    if (payload.start_y > Math.max(0, binnedHeight - 1)) {
+      throw new Error(`StartY должен быть в диапазоне 0..${Math.max(0, binnedHeight - 1)} для bin ${payload.bin_y}`);
+    }
+    if (payload.start_x + payload.num_x > binnedWidth) {
+      throw new Error(`ROI по X выходит за binned frame: StartX + NumX <= ${binnedWidth}`);
+    }
+    if (payload.start_y + payload.num_y > binnedHeight) {
+      throw new Error(`ROI по Y выходит за binned frame: StartY + NumY <= ${binnedHeight}`);
+    }
+  }
+  return payload;
+}
+
+function syncFrameFormToBinning(caps, { forceFullFrame = false } = {}) {
+  if (!caps) return;
+  const sensorX = Number(caps.camera_x_size);
+  const sensorY = Number(caps.camera_y_size);
+  const binX = Math.max(1, readIntegerInput(roiBinXInput, "Bin X"));
+  const binY = Math.max(1, readIntegerInput(roiBinYInput, "Bin Y"));
+  const binnedWidth = Math.max(1, Math.floor(sensorX / binX));
+  const binnedHeight = Math.max(1, Math.floor(sensorY / binY));
+
+  let startX = Math.max(0, Math.min(readIntegerInput(roiStartXInput, "Start X"), binnedWidth - 1));
+  let startY = Math.max(0, Math.min(readIntegerInput(roiStartYInput, "Start Y"), binnedHeight - 1));
+  let numX = readIntegerInput(roiNumXInput, "Num X");
+  let numY = readIntegerInput(roiNumYInput, "Num Y");
+
+  if (forceFullFrame) {
+    startX = 0;
+    startY = 0;
+    numX = binnedWidth;
+    numY = binnedHeight;
+  } else {
+    numX = Math.max(1, Math.min(numX, binnedWidth - startX));
+    numY = Math.max(1, Math.min(numY, binnedHeight - startY));
+  }
+
+  setFrameFormValues({
+    bin_x: binX,
+    bin_y: binY,
+    start_x: startX,
+    start_y: startY,
+    num_x: numX,
+    num_y: numY,
+  });
+  setFrameInputBounds(caps);
+  setFrameSummaryText(describeFrame({ bin_x: binX, bin_y: binY, start_x: startX, start_y: startY, num_x: numX, num_y: numY }, caps));
+}
+
+async function loadFrameCapabilities({ resetToFull = false } = {}) {
+  await ensureConnected();
+  const caps = await callApi("GET", "/camera/capabilities");
+  setFrameInputBounds(caps);
+  if (resetToFull) {
+    setFrameFormValues({
+      bin_x: 1,
+      bin_y: 1,
+      start_x: 0,
+      start_y: 0,
+      num_x: Number(caps.camera_x_size),
+      num_y: Number(caps.camera_y_size),
+    });
+  }
+  try {
+    syncFrameFormToBinning(caps, { forceFullFrame: resetToFull });
+  } catch {
+    setFrameSummaryText(`sensor ${caps.camera_x_size}x${caps.camera_y_size} | заполните параметры ROI`);
+  }
+  return caps;
 }
 
 function setButtonLoading(button, loading, loadingText) {
@@ -564,6 +722,29 @@ document.querySelectorAll(".tab").forEach((button) => {
   button.addEventListener("click", () => switchTab(button.dataset.tab));
 });
 
+[roiBinXInput, roiBinYInput].forEach((node) => {
+  node?.addEventListener("change", async () => {
+    try {
+      const caps = await loadFrameCapabilities();
+      syncFrameFormToBinning(caps, { forceFullFrame: true });
+      setUiHintText("Binning изменен: размер frame автоматически приведен к полному binned кадру.");
+    } catch {
+      setFrameSummaryText("Для авторасчета frame подключите камеру и запросите sensor size.");
+    }
+  });
+});
+
+[roiStartXInput, roiStartYInput, roiNumXInput, roiNumYInput].forEach((node) => {
+  node?.addEventListener("change", async () => {
+    try {
+      const caps = await loadFrameCapabilities();
+      syncFrameFormToBinning(caps);
+    } catch {
+      // Best-effort summary refresh when API is unavailable.
+    }
+  });
+});
+
 // Connection
 bindClick("btnHealth", async () => logInfo("Проверка сервиса (Health)", await callApi("GET", "/health")));
 bindClick("btnState", async () => logInfo("Состояние камеры (State)", await getCameraState()));
@@ -571,6 +752,7 @@ bindClick(
   "btnConnect",
   async () => {
     logInfo("Подключить (Connect)", await callApi("POST", "/camera/connect", {}));
+    await loadFrameCapabilities({ resetToFull: true });
     await refreshDashboard();
   },
   {
@@ -592,8 +774,34 @@ bindClick(
 );
 bindClick("btnCapabilities", async () => {
   await ensureConnected();
-  logInfo("Возможности камеры (Capabilities)", await callApi("GET", "/camera/capabilities"));
+  const caps = await callApi("GET", "/camera/capabilities");
+  setFrameInputBounds(caps);
+  setFrameSummaryText(describeFrame(buildFramePayload(caps), caps));
+  logInfo("Возможности камеры (Capabilities)", caps);
 });
+
+bindClick("btnFrameLoadCaps", async () => {
+  const caps = await loadFrameCapabilities();
+  logInfo("Размер сенсора / ROI bounds", caps);
+}, { loadingText: "Чтение sensor size..." });
+
+bindClick("btnFrameApply", async () => {
+  const caps = await loadFrameCapabilities();
+  const payload = buildFramePayload(caps);
+  const response = await callApi("PUT", "/camera/config/roi-binning", payload);
+  setFrameSummaryText(describeFrame(payload, caps));
+  setUiHintText("Frame/Subframe применен. Можно запускать экспозицию или смотреть latest image.");
+  logInfo("ROI / Subframe applied", { ...payload, response });
+}, { loadingText: "Применение ROI..." });
+
+bindClick("btnFrameFull", async () => {
+  const caps = await loadFrameCapabilities({ resetToFull: true });
+  const payload = buildFramePayload(caps);
+  const response = await callApi("PUT", "/camera/config/roi-binning", payload);
+  setFrameSummaryText(describeFrame(payload, caps));
+  setUiHintText("Возвращен полный кадр 1x1.");
+  logInfo("Full frame applied", { ...payload, response });
+}, { loadingText: "Сброс ROI..." });
 
 // Exposure
 bindClick("btnExposureStart", async () => {
@@ -927,3 +1135,4 @@ refreshDashboard().catch(() => {
   // Best effort first draw.
 });
 startDashboardAutoRefresh();
+setFrameSummaryText("ожидание подключения камеры");

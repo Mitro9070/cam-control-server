@@ -5,6 +5,7 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Globalization;
+using System.IO;
 using System.Runtime.InteropServices;
 
 namespace ASCOM.ProjectR1
@@ -23,6 +24,9 @@ namespace ASCOM.ProjectR1
 
         private readonly TraceLogger _tl;
         private readonly PythonApiClient _apiClient;
+        private static readonly object FileLogLock = new object();
+        private static readonly string FileLogPath =
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "ASCOM", "ProjectR1.Camera.debug.log");
 
         private bool _connected;
         private bool _coolerOn;
@@ -45,6 +49,7 @@ namespace ASCOM.ProjectR1
         {
             _tl = new TraceLogger("", "ProjectR1.Camera");
             _tl.Enabled = true;
+            LogDiagnostic("Camera", "Driver instance created");
             _apiClient = new PythonApiClient();
         }
 
@@ -90,19 +95,39 @@ namespace ASCOM.ProjectR1
             get => _connected;
             set
             {
+                LogDiagnostic(nameof(Connected), $"SET requested={value} current={_connected}");
                 if (value == _connected) return;
                 if (value)
                 {
-                    var response = _apiClient.PostJson("/camera/connect");
-                    _connected = CameraApiValueReader.ReadBool(response, "connected");
-                    RefreshCapabilities();
-                    RefreshCoolingFromServer();
+                    try
+                    {
+                        LogDiagnostic(nameof(Connected), "POST /camera/connect");
+                        var response = _apiClient.PostJson("/camera/connect");
+                        _connected = CameraApiValueReader.ReadBool(response, "connected");
+                        RefreshCapabilities();
+                        RefreshCoolingFromServer();
+                        LogRoiState("Connected after refresh");
+                    }
+                    catch (Exception ex)
+                    {
+                        LogException(nameof(Connected), ex);
+                        throw;
+                    }
                 }
                 else
                 {
-                    _apiClient.PostJson("/camera/disconnect");
-                    _connected = false;
-                    _activeExposureId = null;
+                    try
+                    {
+                        LogDiagnostic(nameof(Connected), "POST /camera/disconnect");
+                        _apiClient.PostJson("/camera/disconnect");
+                        _connected = false;
+                        _activeExposureId = null;
+                    }
+                    catch (Exception ex)
+                    {
+                        LogException(nameof(Connected), ex);
+                        throw;
+                    }
                 }
             }
         }
@@ -124,11 +149,13 @@ namespace ASCOM.ProjectR1
             {
                 try
                 {
+                    LogDiagnostic(nameof(AbortExposure), $"POST /camera/exposures/{_activeExposureId}/abort");
                     _apiClient.PostJson($"/camera/exposures/{_activeExposureId}/abort");
                 }
-                catch
+                catch (Exception ex)
                 {
                     // Exposure may already be finished and removed from active path.
+                    LogException(nameof(AbortExposure), ex);
                 }
             }
         }
@@ -141,9 +168,14 @@ namespace ASCOM.ProjectR1
             get => _binX;
             set
             {
-                ValidateRoiBinning(value, _binY, _numX, _numY, _startX, _startY);
+                _tl.LogMessage(nameof(BinX), $"SET requested={value}");
+                if (value < 1 || value > MaxBinX)
+                {
+                    throw new InvalidValueException(nameof(BinX), value.ToString(), $"range 1..{MaxBinX}");
+                }
                 _binX = value;
-                PushRoiBinning();
+                NormalizeRoiToBounds();
+                LogRoiState("BinX after normalize");
             }
         }
 
@@ -152,9 +184,14 @@ namespace ASCOM.ProjectR1
             get => _binY;
             set
             {
-                ValidateRoiBinning(_binX, value, _numX, _numY, _startX, _startY);
+                _tl.LogMessage(nameof(BinY), $"SET requested={value}");
+                if (value < 1 || value > MaxBinY)
+                {
+                    throw new InvalidValueException(nameof(BinY), value.ToString(), $"range 1..{MaxBinY}");
+                }
                 _binY = value;
-                PushRoiBinning();
+                NormalizeRoiToBounds();
+                LogRoiState("BinY after normalize");
             }
         }
 
@@ -203,13 +240,13 @@ namespace ASCOM.ProjectR1
                 CheckConnected(nameof(CoolerOn));
                 var response = _apiClient.GetJson("/camera/cooling/status");
                 _coolerOn = CameraApiValueReader.ReadBool(response, "cooler_on");
-                _tl.LogMessage(nameof(CoolerOn), $"GET cooler_on={_coolerOn.ToString(CultureInfo.InvariantCulture)}");
+                LogDiagnostic(nameof(CoolerOn), $"GET cooler_on={_coolerOn.ToString(CultureInfo.InvariantCulture)}");
                 return _coolerOn;
             }
             set
             {
                 CheckConnected(nameof(CoolerOn));
-                _tl.LogMessage(nameof(CoolerOn), $"SET requested={value.ToString(CultureInfo.InvariantCulture)}");
+                LogDiagnostic(nameof(CoolerOn), $"SET requested={value.ToString(CultureInfo.InvariantCulture)}");
                 Dictionary<string, object> response;
                 if (value)
                 {
@@ -220,7 +257,7 @@ namespace ASCOM.ProjectR1
                     response = _apiClient.PutJson("/camera/cooling/power", new { cooler_on = false, cooler_power_percent = 0 });
                 }
                 _coolerOn = CameraApiValueReader.ReadBool(response, "cooler_on");
-                _tl.LogMessage(nameof(CoolerOn), $"SET result cooler_on={_coolerOn.ToString(CultureInfo.InvariantCulture)}");
+                LogDiagnostic(nameof(CoolerOn), $"SET result cooler_on={_coolerOn.ToString(CultureInfo.InvariantCulture)}");
             }
         }
 
@@ -338,9 +375,14 @@ namespace ASCOM.ProjectR1
             get => _numX;
             set
             {
-                ValidateRoiBinning(_binX, _binY, value, _numY, _startX, _startY);
+                LogDiagnostic(nameof(NumX), $"SET requested={value}");
+                var maxBinnedWidth = GetBinnedWidth(_binX);
+                if (value < 1 || value > maxBinnedWidth)
+                {
+                    throw new InvalidValueException(nameof(NumX), value.ToString(), $"range 1..{maxBinnedWidth}");
+                }
                 _numX = value;
-                PushRoiBinning();
+                LogRoiState("NumX updated");
             }
         }
 
@@ -349,9 +391,14 @@ namespace ASCOM.ProjectR1
             get => _numY;
             set
             {
-                ValidateRoiBinning(_binX, _binY, _numX, value, _startX, _startY);
+                LogDiagnostic(nameof(NumY), $"SET requested={value}");
+                var maxBinnedHeight = GetBinnedHeight(_binY);
+                if (value < 1 || value > maxBinnedHeight)
+                {
+                    throw new InvalidValueException(nameof(NumY), value.ToString(), $"range 1..{maxBinnedHeight}");
+                }
                 _numY = value;
-                PushRoiBinning();
+                LogRoiState("NumY updated");
             }
         }
 
@@ -420,27 +467,41 @@ namespace ASCOM.ProjectR1
                 CheckConnected(nameof(SetCCDTemperature));
                 var response = _apiClient.GetJson("/camera/cooling/status");
                 _setCcdTemp = CameraApiValueReader.ReadDouble(response, "target_temp_c");
-                _tl.LogMessage(nameof(SetCCDTemperature), $"GET target_temp_c={_setCcdTemp.ToString(CultureInfo.InvariantCulture)}");
+                LogDiagnostic(nameof(SetCCDTemperature), $"GET target_temp_c={_setCcdTemp.ToString(CultureInfo.InvariantCulture)}");
                 return _setCcdTemp;
             }
             set
             {
                 CheckConnected(nameof(SetCCDTemperature));
                 var rounded = (int)Math.Round(value);
-                _tl.LogMessage(nameof(SetCCDTemperature), $"SET requested={value.ToString(CultureInfo.InvariantCulture)} rounded={rounded.ToString(CultureInfo.InvariantCulture)}");
+                LogDiagnostic(nameof(SetCCDTemperature), $"SET requested={value.ToString(CultureInfo.InvariantCulture)} rounded={rounded.ToString(CultureInfo.InvariantCulture)}");
                 var response = _apiClient.PutJson("/camera/cooling/target", new { target_temp_c = rounded });
                 _setCcdTemp = CameraApiValueReader.ReadDouble(response, "target_temp_c");
-                _tl.LogMessage(nameof(SetCCDTemperature), $"SET result target_temp_c={_setCcdTemp.ToString(CultureInfo.InvariantCulture)}");
+                LogDiagnostic(nameof(SetCCDTemperature), $"SET result target_temp_c={_setCcdTemp.ToString(CultureInfo.InvariantCulture)}");
             }
         }
 
         public void StartExposure(double Duration, bool Light)
         {
             CheckConnected(nameof(StartExposure));
-            _lastExposureDuration = Duration;
-            _lastExposureStart = DateTime.Now;
-            var response = _apiClient.PostJson("/camera/exposures", new { duration_sec = Duration, light = Light });
-            _activeExposureId = CameraApiValueReader.ReadString(response, "exposure_id");
+            LogDiagnostic(nameof(StartExposure), $"ENTER duration={Duration.ToString(CultureInfo.InvariantCulture)} light={Light}");
+            LogRoiState("StartExposure before validate");
+            try
+            {
+                ValidateRoiBinning(_binX, _binY, _numX, _numY, _startX, _startY);
+                PushRoiBinning();
+                _lastExposureDuration = Duration;
+                _lastExposureStart = DateTime.Now;
+                LogDiagnostic(nameof(StartExposure), $"POST /camera/exposures duration={Duration.ToString(CultureInfo.InvariantCulture)} light={Light}");
+                var response = _apiClient.PostJson("/camera/exposures", new { duration_sec = Duration, light = Light });
+                _activeExposureId = CameraApiValueReader.ReadString(response, "exposure_id");
+                LogDiagnostic(nameof(StartExposure), $"OK exposure_id={_activeExposureId}");
+            }
+            catch (Exception ex)
+            {
+                LogException(nameof(StartExposure), ex);
+                throw;
+            }
         }
 
         public int StartX
@@ -448,9 +509,15 @@ namespace ASCOM.ProjectR1
             get => _startX;
             set
             {
-                ValidateRoiBinning(_binX, _binY, _numX, _numY, value, _startY);
+                LogDiagnostic(nameof(StartX), $"SET requested={value}");
+                var maxStartX = GetMaxStartX(_binX);
+                if (value < 0 || value > maxStartX)
+                {
+                    throw new InvalidValueException(nameof(StartX), value.ToString(), $"range 0..{maxStartX}");
+                }
                 _startX = value;
-                PushRoiBinning();
+                NormalizeRoiToBounds();
+                LogRoiState("StartX after normalize");
             }
         }
 
@@ -459,9 +526,15 @@ namespace ASCOM.ProjectR1
             get => _startY;
             set
             {
-                ValidateRoiBinning(_binX, _binY, _numX, _numY, _startX, value);
+                LogDiagnostic(nameof(StartY), $"SET requested={value}");
+                var maxStartY = GetMaxStartY(_binY);
+                if (value < 0 || value > maxStartY)
+                {
+                    throw new InvalidValueException(nameof(StartY), value.ToString(), $"range 0..{maxStartY}");
+                }
                 _startY = value;
-                PushRoiBinning();
+                NormalizeRoiToBounds();
+                LogRoiState("StartY after normalize");
             }
         }
 
@@ -472,11 +545,13 @@ namespace ASCOM.ProjectR1
             {
                 try
                 {
+                    LogDiagnostic(nameof(StopExposure), $"POST /camera/exposures/{_activeExposureId}/stop");
                     _apiClient.PostJson($"/camera/exposures/{_activeExposureId}/stop");
                 }
-                catch
+                catch (Exception ex)
                 {
                     // Exposure may already be finished and removed from active path.
+                    LogException(nameof(StopExposure), ex);
                 }
             }
         }
@@ -526,6 +601,7 @@ namespace ASCOM.ProjectR1
 
         private void RefreshCapabilities()
         {
+            LogDiagnostic(nameof(RefreshCapabilities), "GET /camera/capabilities");
             var capabilities = _apiClient.GetJson("/camera/capabilities");
             _cameraXSize = CameraApiValueReader.ReadInt(capabilities, "camera_x_size");
             _cameraYSize = CameraApiValueReader.ReadInt(capabilities, "camera_y_size");
@@ -533,11 +609,16 @@ namespace ASCOM.ProjectR1
             _hasShutter = CameraApiValueReader.ReadBool(capabilities, "has_shutter");
             _numX = _cameraXSize;
             _numY = _cameraYSize;
+            LogRoiState("RefreshCapabilities initialized ROI");
         }
 
         private void PushRoiBinning()
         {
             if (!_connected) return;
+            ValidateRoiBinning(_binX, _binY, _numX, _numY, _startX, _startY);
+            LogDiagnostic(
+                nameof(PushRoiBinning),
+                $"PUT /camera/config/roi-binning bin=({_binX},{_binY}) start=({_startX},{_startY}) num=({_numX},{_numY}) sensor=({_cameraXSize},{_cameraYSize})");
             _apiClient.PutJson("/camera/config/roi-binning", new
             {
                 bin_x = _binX,
@@ -547,18 +628,119 @@ namespace ASCOM.ProjectR1
                 start_x = _startX,
                 start_y = _startY
             });
+            LogDiagnostic(nameof(PushRoiBinning), "OK");
+        }
+
+        private int GetBinnedWidth(short binX)
+        {
+            if (binX < 1) return 0;
+            return Math.Max(1, _cameraXSize / binX);
+        }
+
+        private int GetBinnedHeight(short binY)
+        {
+            if (binY < 1) return 0;
+            return Math.Max(1, _cameraYSize / binY);
+        }
+
+        private int GetMaxStartX(short binX)
+        {
+            if (binX < 1) return 0;
+            return Math.Max(0, GetBinnedWidth(binX) - 1);
+        }
+
+        private int GetMaxStartY(short binY)
+        {
+            if (binY < 1) return 0;
+            return Math.Max(0, GetBinnedHeight(binY) - 1);
+        }
+
+        private int GetMaxNumX(short binX, int startX)
+        {
+            if (binX < 1) return 0;
+            var available = GetBinnedWidth(binX) - startX;
+            return Math.Max(0, available);
+        }
+
+        private int GetMaxNumY(short binY, int startY)
+        {
+            if (binY < 1) return 0;
+            var available = GetBinnedHeight(binY) - startY;
+            return Math.Max(0, available);
+        }
+
+        private void NormalizeRoiToBounds()
+        {
+            var before = GetRoiStateSummary();
+            _startX = Math.Min(_startX, GetMaxStartX(_binX));
+            _startY = Math.Min(_startY, GetMaxStartY(_binY));
+            var maxNumX = GetMaxNumX(_binX, _startX);
+            var maxNumY = GetMaxNumY(_binY, _startY);
+            if (maxNumX < 1)
+            {
+                throw new InvalidValueException(nameof(StartX), _startX.ToString(), "no pixels remain for current BinX");
+            }
+            if (maxNumY < 1)
+            {
+                throw new InvalidValueException(nameof(StartY), _startY.ToString(), "no pixels remain for current BinY");
+            }
+
+            if (_numX > maxNumX) _numX = maxNumX;
+            if (_numY > maxNumY) _numY = maxNumY;
+            LogDiagnostic(nameof(NormalizeRoiToBounds), $"before={before} after={GetRoiStateSummary()} maxNum=({maxNumX},{maxNumY})");
         }
 
         private void ValidateRoiBinning(short binX, short binY, int numX, int numY, int startX, int startY)
         {
+            LogDiagnostic(nameof(ValidateRoiBinning), $"validate bin=({binX},{binY}) start=({startX},{startY}) num=({numX},{numY}) sensor=({_cameraXSize},{_cameraYSize})");
             if (binX < 1 || binX > MaxBinX) throw new InvalidValueException(nameof(BinX), binX.ToString(), $"range 1..{MaxBinX}");
             if (binY < 1 || binY > MaxBinY) throw new InvalidValueException(nameof(BinY), binY.ToString(), $"range 1..{MaxBinY}");
-            if (numX < 1 || numX > _cameraXSize) throw new InvalidValueException(nameof(NumX), numX.ToString(), $"range 1..{_cameraXSize}");
-            if (numY < 1 || numY > _cameraYSize) throw new InvalidValueException(nameof(NumY), numY.ToString(), $"range 1..{_cameraYSize}");
-            if (startX < 0 || startX >= _cameraXSize) throw new InvalidValueException(nameof(StartX), startX.ToString(), $"range 0..{_cameraXSize - 1}");
-            if (startY < 0 || startY >= _cameraYSize) throw new InvalidValueException(nameof(StartY), startY.ToString(), $"range 0..{_cameraYSize - 1}");
-            if (startX + numX > _cameraXSize) throw new InvalidValueException(nameof(NumX), numX.ToString(), "StartX + NumX exceeds CameraXSize");
-            if (startY + numY > _cameraYSize) throw new InvalidValueException(nameof(NumY), numY.ToString(), "StartY + NumY exceeds CameraYSize");
+            var maxStartX = GetMaxStartX(binX);
+            var maxStartY = GetMaxStartY(binY);
+            if (startX < 0 || startX > maxStartX) throw new InvalidValueException(nameof(StartX), startX.ToString(), $"range 0..{maxStartX}");
+            if (startY < 0 || startY > maxStartY) throw new InvalidValueException(nameof(StartY), startY.ToString(), $"range 0..{maxStartY}");
+            var maxNumX = GetMaxNumX(binX, startX);
+            var maxNumY = GetMaxNumY(binY, startY);
+            if (numX < 1 || numX > maxNumX) throw new InvalidValueException(nameof(NumX), numX.ToString(), $"range 1..{maxNumX}");
+            if (numY < 1 || numY > maxNumY) throw new InvalidValueException(nameof(NumY), numY.ToString(), $"range 1..{maxNumY}");
+        }
+
+        private string GetRoiStateSummary()
+        {
+            return $"bin=({_binX},{_binY}) start=({_startX},{_startY}) num=({_numX},{_numY}) sensor=({_cameraXSize},{_cameraYSize})";
+        }
+
+        private void LogRoiState(string context)
+        {
+            LogDiagnostic(context, GetRoiStateSummary());
+        }
+
+        private void LogException(string context, Exception ex)
+        {
+            LogDiagnostic(context, $"EXCEPTION {ex.GetType().FullName}: {ex.Message}");
+            LogDiagnostic(context, ex.ToString());
+        }
+
+        private void LogDiagnostic(string context, string message)
+        {
+            _tl.LogMessage(context, message);
+            try
+            {
+                var dir = Path.GetDirectoryName(FileLogPath);
+                if (!string.IsNullOrWhiteSpace(dir))
+                {
+                    Directory.CreateDirectory(dir);
+                }
+                var line = $"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} [{context}] {message}{Environment.NewLine}";
+                lock (FileLogLock)
+                {
+                    File.AppendAllText(FileLogPath, line);
+                }
+            }
+            catch
+            {
+                // Best-effort file logging; TraceLogger remains primary.
+            }
         }
 
         private void CheckConnected(string member)

@@ -26,9 +26,8 @@
 | `AbortExposure()` | `POST /camera/exposures/{id}/abort` | Принудительная отмена |
 | `StopExposure()` | `POST /camera/exposures/{id}/stop` | Корректная остановка |
 | `ImageReady` | `GET /camera/exposures/{id}/status` | `image_ready=true/false` |
-| `ImageArray` | `GET /camera/images/latest` | Возврат массива/байт |
-| `BinX/BinY` | `PUT /camera/config/binning` | Валидация ограничений |
-| `NumX/NumY/StartX/StartY` | `PUT /camera/config/roi` | ROI |
+| `ImageArray` | `GET /camera/images/latest/raw` | Бинарный `uint16` кадр для ASCOM/MaxIm DL |
+| `BinX/BinY/NumX/NumY/StartX/StartY` | `PUT /camera/config/roi-binning` | ROI/Subframe + binning |
 | `CoolerOn` | `PUT /camera/cooling/power` | on/off |
 | `SetCCDTemperature` | `PUT /camera/cooling/target` | target C |
 | `CCDTemperature` | `GET /camera/cooling/status` | текущая температура |
@@ -116,6 +115,14 @@ Request:
   "profile_id": "optional-uuid"
 }
 ```
+
+### ROI/Subframe semantics
+- Конфигурация `Subframe` и `Binning` задается отдельно через `PUT /camera/config/roi-binning` до `StartExposure`.
+- Геометрия проверяется по формуле:
+  - `start_x + num_x * bin_x <= camera_x_size`
+  - `start_y + num_y * bin_y <= camera_y_size`
+- Для native SDK чтение из DLL по-прежнему выполняется через буфер полного кадра (во избежание `access violation`), после чего ROI/Subframe и binning применяются в runtime перед отдачей `ImageArray`.
+- Это обеспечивает совместимость с ASCOM-клиентами, включая MaxIm DL, где `StartX/StartY/NumX/NumY` могут устанавливаться по отдельности.
 Response:
 ```json
 {

@@ -345,6 +345,23 @@ main {
   margin-bottom: 10px;
 }
 
+.roi-grid label {
+  min-width: 138px;
+}
+
+.roi-grid input[type="number"] {
+  width: 96px;
+}
+
+#frameSummary {
+  display: inline-block;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: #0f1520;
+  border: 1px solid #273043;
+  color: #dfe9ff;
+}
+
 label {
   display: flex;
   align-items: center;

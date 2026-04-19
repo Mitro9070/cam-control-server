@@ -51,6 +51,12 @@ class ExposureJob:
     percent: int = 0
     error: str | None = None
     completion_logged: bool = False
+    bin_x: int = 1
+    bin_y: int = 1
+    num_x: int = 2048
+    num_y: int = 2052
+    start_x: int = 0
+    start_y: int = 0
 
 
 @dataclass
@@ -369,6 +375,81 @@ class CameraRuntime:
             raise SdkError(code=SdkErrorCode.NOT_CONNECTED, message="camera is not connected")
         return asdict(self._state.capabilities)
 
+    @staticmethod
+    def _validate_roi_geometry(
+        sensor_width: int,
+        sensor_height: int,
+        bin_x: int,
+        bin_y: int,
+        num_x: int,
+        num_y: int,
+        start_x: int,
+        start_y: int,
+    ) -> None:
+        if start_x < 0 or start_y < 0:
+            raise SdkError(code=SdkErrorCode.INVALID_STATUS, message="start_x/start_y must be >= 0")
+        if num_x <= 0 or num_y <= 0:
+            raise SdkError(code=SdkErrorCode.INVALID_STATUS, message="num_x/num_y must be > 0")
+        max_start_x = (sensor_width // bin_x) - 1
+        max_start_y = (sensor_height // bin_y) - 1
+        if start_x > max_start_x or start_y > max_start_y:
+            raise SdkError(code=SdkErrorCode.INVALID_STATUS, message="start_x/start_y exceed binned sensor bounds")
+        roi_sensor_width = num_x * bin_x
+        roi_sensor_height = num_y * bin_y
+        if roi_sensor_width <= 0 or roi_sensor_height <= 0:
+            raise SdkError(code=SdkErrorCode.INVALID_STATUS, message="ROI geometry must be positive")
+        sensor_start_x = start_x * bin_x
+        sensor_start_y = start_y * bin_y
+        if sensor_start_x + roi_sensor_width > sensor_width or sensor_start_y + roi_sensor_height > sensor_height:
+            raise SdkError(code=SdkErrorCode.INVALID_STATUS, message="ROI exceeds sensor bounds")
+
+    @classmethod
+    def _crop_and_bin_frame_bytes(
+        cls,
+        frame_bytes: bytes,
+        frame_width: int,
+        frame_height: int,
+        *,
+        bin_x: int,
+        bin_y: int,
+        num_x: int,
+        num_y: int,
+        start_x: int,
+        start_y: int,
+    ) -> tuple[int, int, bytes]:
+        cls._validate_roi_geometry(frame_width, frame_height, bin_x, bin_y, num_x, num_y, start_x, start_y)
+        expected_bytes = frame_width * frame_height * 2
+        if len(frame_bytes) < expected_bytes:
+            raise SdkError(code=SdkErrorCode.INVALID_STATUS, message="frame payload is smaller than expected")
+
+        pixels = cls._decode_u16_le(frame_bytes[:expected_bytes])
+        sensor_start_x = start_x * bin_x
+        sensor_start_y = start_y * bin_y
+        roi_sensor_width = num_x * bin_x
+        roi_sensor_height = num_y * bin_y
+        roi_pixels = [0] * (roi_sensor_width * roi_sensor_height)
+
+        for y in range(roi_sensor_height):
+            src_offset = (sensor_start_y + y) * frame_width + sensor_start_x
+            dst_offset = y * roi_sensor_width
+            roi_pixels[dst_offset : dst_offset + roi_sensor_width] = pixels[src_offset : src_offset + roi_sensor_width]
+
+        if bin_x == 1 and bin_y == 1:
+            return num_x, num_y, cls._encode_u16_le(roi_pixels)
+
+        binned_pixels = [0] * (num_x * num_y)
+        for out_y in range(num_y):
+            src_y = out_y * bin_y
+            for out_x in range(num_x):
+                src_x = out_x * bin_x
+                total = 0
+                for by in range(bin_y):
+                    row_offset = (src_y + by) * roi_sensor_width + src_x
+                    total += sum(roi_pixels[row_offset : row_offset + bin_x])
+                binned_pixels[out_y * num_x + out_x] = min(65535, total)
+
+        return num_x, num_y, cls._encode_u16_le(binned_pixels)
+
     def set_roi_binning(self, bin_x: int, bin_y: int, num_x: int, num_y: int, start_x: int, start_y: int) -> None:
         caps = self._state.capabilities
         if not self._state.connected or caps is None:
@@ -377,12 +458,7 @@ class CameraRuntime:
             raise SdkError(code=SdkErrorCode.INVALID_STATUS, message=f"bin_x out of range 1..{caps.max_binx}")
         if bin_y < 1 or bin_y > caps.max_biny:
             raise SdkError(code=SdkErrorCode.INVALID_STATUS, message=f"bin_y out of range 1..{caps.max_biny}")
-        if start_x < 0 or start_y < 0:
-            raise SdkError(code=SdkErrorCode.INVALID_STATUS, message="start_x/start_y must be >= 0")
-        if num_x <= 0 or num_y <= 0:
-            raise SdkError(code=SdkErrorCode.INVALID_STATUS, message="num_x/num_y must be > 0")
-        if start_x + num_x > caps.camera_x_size or start_y + num_y > caps.camera_y_size:
-            raise SdkError(code=SdkErrorCode.INVALID_STATUS, message="ROI exceeds sensor bounds")
+        self._validate_roi_geometry(caps.camera_x_size, caps.camera_y_size, bin_x, bin_y, num_x, num_y, start_x, start_y)
 
         self._state.bin_x = bin_x
         self._state.bin_y = bin_y
@@ -400,7 +476,19 @@ class CameraRuntime:
         with self._lock:
             exposure_id = str(uuid.uuid4())
             self._adapter.start_exposure(settings.camera_index, duration_sec, light)
-            job = ExposureJob(exposure_id=exposure_id, duration_sec=duration_sec, light=light, state="exposing", image_ready=False)
+            job = ExposureJob(
+                exposure_id=exposure_id,
+                duration_sec=duration_sec,
+                light=light,
+                state="exposing",
+                image_ready=False,
+                bin_x=self._state.bin_x,
+                bin_y=self._state.bin_y,
+                num_x=self._state.num_x,
+                num_y=self._state.num_y,
+                start_x=self._state.start_x,
+                start_y=self._state.start_y,
+            )
             self._exposures[exposure_id] = job
             self._state.active_exposure_id = exposure_id
             self._state.camera_state = "exposing"
@@ -448,16 +536,35 @@ class CameraRuntime:
             if job is None or job.state in {"aborted", "stopped"}:
                 return
             try:
-                # Native SDK path currently reads full-frame payload.
-                # Using smaller ROI dimensions for buffer allocation can cause
-                # native buffer overrun/access violation in vendor DLL.
+                bin_x = job.bin_x
+                bin_y = job.bin_y
+                num_x = job.num_x
+                num_y = job.num_y
+                start_x = job.start_x
+                start_y = job.start_y
+
+                # Native SDK path still reads a full-frame payload because
+                # smaller buffers can trigger vendor DLL overruns/access violations.
+                # Apply ROI/binning in managed code before exposing ImageArray.
                 if settings.sdk_mode == "native" and self._state.capabilities is not None:
-                    width = self._state.capabilities.camera_x_size
-                    height = self._state.capabilities.camera_y_size
+                    raw_width = self._state.capabilities.camera_x_size
+                    raw_height = self._state.capabilities.camera_y_size
+                    frame_bytes = self._adapter.read_measurement_data(settings.camera_index, raw_width, raw_height)
+                    width, height, frame_bytes = self._crop_and_bin_frame_bytes(
+                        frame_bytes,
+                        raw_width,
+                        raw_height,
+                        bin_x=bin_x,
+                        bin_y=bin_y,
+                        num_x=num_x,
+                        num_y=num_y,
+                        start_x=start_x,
+                        start_y=start_y,
+                    )
                 else:
-                    width = self._state.num_x
-                    height = self._state.num_y
-                frame_bytes = self._adapter.read_measurement_data(settings.camera_index, width, height)
+                    width = num_x
+                    height = num_y
+                    frame_bytes = self._adapter.read_measurement_data(settings.camera_index, width, height)
                 job.state = "completed"
                 job.image_ready = True
                 job.percent = 100
@@ -470,8 +577,8 @@ class CameraRuntime:
                     "height": height,
                     "pixel_type": "uint16",
                     "orientation": "top_left_origin",
-                    "bin_x": self._state.bin_x,
-                    "bin_y": self._state.bin_y,
+                    "bin_x": bin_x,
+                    "bin_y": bin_y,
                     "sample_pixels": self._first_pixels(frame_bytes),
                     "pixel_data_base64": base64.b64encode(frame_bytes).decode("ascii"),
                 }

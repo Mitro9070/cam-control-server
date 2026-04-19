@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Project_R1 Camera UI</title>
     <link rel="icon" href="data:," />
-    <link rel="stylesheet" href="/ui/styles.css?v=20260325" />
+    <link rel="stylesheet" href="/ui/styles.css?v=20260419-subframe" />
   </head>
   <body>
     <header class="site-header">
@@ -99,6 +99,22 @@
           <label>Длительность, сек (Duration) <input type="number" id="expDuration" value="1" min="0.1" step="0.1" /></label>
           <label>Светлый кадр (Light frame) <input type="checkbox" id="expLight" checked /></label>
         </div>
+        <h3>Фрейм / Subframe</h3>
+        <p class="hint-inline">Управление ROI для фокусировки в MaxIm DL и в локальной панели: `StartX/StartY`, `NumX/NumY`, `BinX/BinY`.</p>
+        <div class="row roi-grid">
+          <label>Bin X <input type="number" id="roiBinX" value="1" min="1" step="1" /></label>
+          <label>Bin Y <input type="number" id="roiBinY" value="1" min="1" step="1" /></label>
+          <label>Start X <input type="number" id="roiStartX" value="0" min="0" step="1" /></label>
+          <label>Start Y <input type="number" id="roiStartY" value="0" min="0" step="1" /></label>
+          <label>Num X <input type="number" id="roiNumX" value="2048" min="1" step="1" /></label>
+          <label>Num Y <input type="number" id="roiNumY" value="2052" min="1" step="1" /></label>
+        </div>
+        <div class="actions">
+          <button id="btnFrameLoadCaps">Подтянуть sensor size</button>
+          <button id="btnFrameApply">Применить frame/subframe</button>
+          <button id="btnFrameFull">Полный кадр 1x1</button>
+        </div>
+        <p class="hint-inline">Текущая геометрия: <code id="frameSummary">ожидание параметров сенсора</code></p>
         <div class="actions">
           <button id="btnExposureStart">Старт (Start)</button>
           <button id="btnExposureStatus">Статус (Status)</button>
@@ -254,6 +270,6 @@
       <pre id="output"></pre>
     </section>
 
-    <script src="/ui/app.js?v=20260325"></script>
+    <script src="/ui/app.js?v=20260419-subframe"></script>
   </body>
 </html>

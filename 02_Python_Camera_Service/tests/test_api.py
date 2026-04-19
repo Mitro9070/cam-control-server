@@ -1,8 +1,10 @@
+import struct
 import time
 from pathlib import Path
 
 from fastapi.testclient import TestClient
 
+from app.camera_runtime import CameraRuntime
 from app.main import app
 
 client = TestClient(app)
@@ -224,8 +226,55 @@ def test_roi_binning_validation():
 
     out_of_bounds = client.put(
         "/api/v1/camera/config/roi-binning",
-        json={"bin_x": 1, "bin_y": 1, "num_x": 5000, "num_y": 128, "start_x": 0, "start_y": 0},
+        json={"bin_x": 2, "bin_y": 1, "num_x": 1000, "num_y": 128, "start_x": 100, "start_y": 0},
     )
     assert out_of_bounds.status_code == 400
 
     client.post("/api/v1/camera/disconnect")
+
+
+def test_crop_and_bin_frame_bytes_applies_subframe_geometry():
+    pixels = list(range(1, 17))
+    frame_bytes = struct.pack("<" + "H" * len(pixels), *pixels)
+
+    width, height, cropped = CameraRuntime._crop_and_bin_frame_bytes(
+        frame_bytes,
+        4,
+        4,
+        bin_x=1,
+        bin_y=1,
+        num_x=2,
+        num_y=2,
+        start_x=1,
+        start_y=1,
+    )
+    assert (width, height) == (2, 2)
+    assert struct.unpack("<4H", cropped) == (6, 7, 10, 11)
+
+    width, height, binned = CameraRuntime._crop_and_bin_frame_bytes(
+        frame_bytes,
+        4,
+        4,
+        bin_x=2,
+        bin_y=2,
+        num_x=2,
+        num_y=2,
+        start_x=0,
+        start_y=0,
+    )
+    assert (width, height) == (2, 2)
+    assert struct.unpack("<4H", binned) == (14, 22, 46, 54)
+
+    width, height, shifted_binned = CameraRuntime._crop_and_bin_frame_bytes(
+        frame_bytes,
+        4,
+        4,
+        bin_x=2,
+        bin_y=2,
+        num_x=1,
+        num_y=1,
+        start_x=1,
+        start_y=0,
+    )
+    assert (width, height) == (1, 1)
+    assert struct.unpack("<1H", shifted_binned) == (22,)
